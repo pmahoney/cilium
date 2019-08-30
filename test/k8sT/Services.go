@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	. "github.com/cilium/cilium/test/ginkgo-ext"
@@ -483,18 +484,24 @@ var _ = Describe("K8sServicesTest", func() {
 		})
 	})
 
+	// FIXME: to test external IPs one needs to setup a routing to the VMs
+	//        a manual test can be achieved by running
+	//        Disable kube-proxy
+	//        start cilium with --enable-node-port --device=enp0s9
+	//        kubectl apply -f test/k8sT/manifests/demo.yaml
+	//        kubectl apply -f test/k8sT/manifests/external-ips-service.yaml
+	//        (outside of the VM add a route for the external IP via the IP
+	//        of the VM where the service is installed)
+	//        $ ip r a 192.0.2.233 via 192.168.34.11
+	//        $ curl 192.0.2.233:82
+	//        <html><body><h1>It works!</h1></body></html>
 	Context("External IPs services", func() {
 
 		var (
-			externalIP   = "192.168.9.10"
-			expectedCIDR = externalIP + "/32"
-			serviceName  = "external-ips-service." + helpers.DefaultNamespace + ".svc.cluster.local"
-			podName      = "toservices"
-
-			podPath           = helpers.ManifestGet("external_pod.yaml")
-			policyPath        = helpers.ManifestGet("external-policy-external-ips-service.yaml")
-			policyLabeledPath = helpers.ManifestGet("external-policy-labeled.yaml")
-			servicePath       = helpers.ManifestGet("external-ips-service.yaml")
+			externalIP                              = "192.0.2.233"
+			expectedCIDR                            = externalIP + "/32"
+			podName                                 = "toservices"
+			podPath, policyLabeledPath, servicePath string
 
 			// shouldConnect asserts that srcPod can connect to dst.
 			shouldConnect = func(srcPod, dst string) {
@@ -505,6 +512,12 @@ var _ = Describe("K8sServicesTest", func() {
 		)
 
 		BeforeAll(func() {
+			podPath = helpers.ManifestGet(kubectl.BasePath(), "demo.yaml")
+			policyLabeledPath = helpers.ManifestGet(kubectl.BasePath(), "external-policy-labeled.yaml")
+			servicePath = helpers.ManifestGet(kubectl.BasePath(), "external-ips-service.yaml")
+
+			localExec := helpers.CreateLocalExecutor(os.Environ())
+			localExec.Exec(fmt.Sprintf("sudo ip route add %s via %s", externalIP, helpers.K8s1Ip))
 			kubectl.Apply(servicePath).ExpectSuccess("cannot install external service")
 			kubectl.Apply(podPath).ExpectSuccess("cannot install pod path")
 
@@ -520,11 +533,12 @@ var _ = Describe("K8sServicesTest", func() {
 			_ = kubectl.Delete(podPath)
 
 			ExpectAllPodsTerminated(kubectl)
+			localExec := helpers.CreateLocalExecutor(os.Environ())
+			localExec.Exec(fmt.Sprintf("sudo ip route delete %s via %s", externalIP, helpers.K8s1Ip))
 		})
 
 		AfterEach(func() {
 			_ = kubectl.Delete(policyLabeledPath)
-			_ = kubectl.Delete(policyPath)
 		})
 
 		validateEgress := func() {
@@ -565,15 +579,6 @@ var _ = Describe("K8sServicesTest", func() {
 			err := kubectl.WaitForKubeDNSEntry("external-ips-service", helpers.DefaultNamespace)
 			Expect(err).To(BeNil(), "DNS entry is not ready after timeout")
 			shouldConnect(podName, serviceName)
-		})
-
-		It("To Services first policy", func() {
-			applyPolicy(policyPath)
-
-			validateEgress()
-
-			kubectl.Delete(policyPath)
-			validateEgressAfterDeletion()
 		})
 
 		It("To Services first endpoint creation match service by labels", func() {
