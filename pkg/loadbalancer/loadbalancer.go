@@ -336,15 +336,6 @@ func NewL3n4AddrID(protocol L4Type, ip net.IP, portNumber uint16, id ID) *L3n4Ad
 	return &L3n4AddrID{L3n4Addr: *l3n4Addr, ID: id}
 }
 
-// DeepCopy returns a DeepCopy of the given L3n4AddrID.
-func (l *L3n4AddrID) DeepCopy() *L3n4AddrID {
-	return &L3n4AddrID{
-		L3n4Addr: *l.L3n4Addr.DeepCopy(),
-		ID:       l.ID,
-	}
-
-}
-
 // IsIPv6 returns true if the IP address in L3n4Addr's L3n4AddrID is IPv6 or not.
 func (l *L3n4AddrID) IsIPv6() bool {
 	return l.L3n4Addr.IsIPv6()
