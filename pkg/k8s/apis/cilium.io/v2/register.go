@@ -983,26 +983,31 @@ var (
 	}
 
 	TLSContext = map[string]apiextensionsv1beta1.JSONSchemaProps{
+		"k8sSecret": {
+			Description: "K8sSecret is the secret that contains the certificates and private key for the TLS context.",
+			Type:        "object",
+			Properties:  K8sSecret,
+		},
+		"directory": {
+			Description: "File system directory, relative to a configured certs root, that contains " +
+				"the certificates and private key for the TLS context.",
+			Type: "string",
+		},
 		"certificate": {
-			Description: "Certificate is a chain of certificates presented to the remote party. " +
-				"If specified for an originating TLS context, then this is used as a " +
-				"client certificate.",
-			Type:       "object",
-			Properties: K8sSecret,
+			Description: "Certificate is the file name or k8s secret item name for the certificate chain. " +
+				"If omitted, 'tls.crt' is assumed, if it exists. If given, the item must exist.",
+			Type: "string",
 		},
 		"privateKey": {
-			Description: "PrivateKey is the private key used to encrypt the TLS messages. This " +
-				"is the private part of the public/private key pair, corresponding to " +
-				"the public key in the certificate.",
-			Type:       "object",
-			Properties: K8sSecret,
+			Description: "PrivateKey is the file name or k8s secret item name for the private key matching " +
+				"the certificate chain. If omitted, 'tls.key' is assumed, if it exists. " +
+				"If given, the item must exist.",
+			Type: "string",
 		},
 		"trustedCA": {
-			Description: "TrustedCA is a set of trusted certificate authorities used to verify " +
-				"the certificate of the remote party. If specified for a terminating " +
-				"TLS context, then a client certificate is required.",
-			Type:       "object",
-			Properties: K8sSecret,
+			Description: "TrustedCA is the file name or k8s secret item name for the trusted CA. " +
+				"If omitted, 'ca.crt' is assumed, if it exists. If given, the item must exist.",
+			Type: "string",
 		},
 	}
 

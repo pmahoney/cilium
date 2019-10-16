@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	caName      = "ca.crt"
-	publicName  = "public.crt"
-	privateName = "private.crt"
+	caDefaultName      = "ca.crt"
+	publicDefaultName  = "tls.crt"
+	privateDefaultName = "tls.key"
 )
 
 type k8sClient interface {
@@ -51,10 +51,32 @@ func NewManager(certsRootPath string, k8sClient k8sClient) *Manager {
 // GetTLSContext returns a new ca, public and private certificates found based
 // in the given api.TLSContext.
 func (m *Manager) GetTLSContext(ctx context.Context, tlsCtx *api.TLSContext) (ca, public, private string, err error) {
+	var caBytes, publicBytes, privateBytes []byte
+
+	caMustExist := false
+	caName := caDefaultName
+	if tlsCtx.TrustedCA != "" {
+		caName = tlsCtx.TrustedCA
+		caMustExist = true
+	}
+
+	publicMustExist := false
+	publicName := publicDefaultName
+	if tlsCtx.Certificate != "" {
+		publicName = tlsCtx.Certificate
+		publicMustExist = true
+	}
+
+	privateMustExist := false
+	privateName := privateDefaultName
+	if tlsCtx.PrivateKey != "" {
+		privateName = tlsCtx.PrivateKey
+		privateMustExist = true
+	}
+
 	// Give priority to local certificates
-	if tlsCtx.CertificatesPath != nil {
-		var caBytes, publicBytes, privateBytes []byte
-		certPath := filepath.Join(m.rootPath, *tlsCtx.CertificatesPath)
+	if tlsCtx.CertificatesPath != "" {
+		certPath := filepath.Join(m.rootPath, tlsCtx.CertificatesPath)
 		files, ioErr := ioutil.ReadDir(certPath)
 		if ioErr != nil {
 			err = fmt.Errorf("Certificates directory %s not found (%s)", certPath, ioErr)
@@ -66,9 +88,11 @@ func (m *Manager) GetTLSContext(ctx context.Context, tlsCtx *api.TLSContext) (ca
 					path = filepath.Join(certPath, caName)
 					caBytes, ioErr = ioutil.ReadFile(path)
 				case publicName:
+					privateMustExist = true
 					path = filepath.Join(certPath, publicName)
 					publicBytes, ioErr = ioutil.ReadFile(path)
 				case privateName:
+					publicMustExist = true
 					path = filepath.Join(certPath, privateName)
 					privateBytes, ioErr = ioutil.ReadFile(path)
 				}
@@ -76,9 +100,18 @@ func (m *Manager) GetTLSContext(ctx context.Context, tlsCtx *api.TLSContext) (ca
 					err = fmt.Errorf("Error reading %s (%s)", path, ioErr)
 				}
 			}
-			if publicBytes != nil && privateBytes == nil ||
-				publicBytes == nil && privateBytes != nil {
-				err = fmt.Errorf("Both %s and %s have to be present if one of them is", publicName, privateName)
+			// Error out if required files are missing
+			if caMustExist && (caBytes == nil || len(caBytes) == 0) {
+				err = fmt.Errorf("Trusted CA %s cannot be read in %s: %s", caName, certPath, err)
+				return "", "", "", err
+			}
+			if publicMustExist && (publicBytes == nil || len(publicBytes) == 0) {
+				err = fmt.Errorf("Certificate %s cannot be read in %s: %s", publicName, certPath, err)
+				return "", "", "", err
+			}
+			if privateMustExist && (privateBytes == nil || len(privateBytes) == 0) {
+				err = fmt.Errorf("Private key %s cannot be read in %s: %s", privateName, certPath, err)
+				return "", "", "", err
 			}
 			// We have found one of the files, that's all we need!
 			if caBytes != nil || publicBytes != nil || privateBytes != nil {
@@ -97,14 +130,23 @@ func (m *Manager) GetTLSContext(ctx context.Context, tlsCtx *api.TLSContext) (ca
 		caBytes, ok := secrets[caName]
 		if ok {
 			ca = string(caBytes)
+		} else if caMustExist {
+			err = fmt.Errorf("Trusted CA %s cannot be found in KssSecret %s/%s", caName, ns, name)
+			return "", "", "", err
 		}
 		publicBytes, ok := secrets[publicName]
 		if ok {
 			public = string(publicBytes)
+		} else if publicMustExist {
+			err = fmt.Errorf("Certificate %s cannot be found in KssSecret %s/%s", publicName, ns, name)
+			return "", "", "", err
 		}
 		privateBytes, ok := secrets[privateName]
 		if ok {
 			private = string(privateBytes)
+		} else if privateMustExist {
+			err = fmt.Errorf("Private Key %s cannot be found in KssSecret %s/%s", privateName, ns, name)
+			return "", "", "", err
 		}
 		if caBytes != nil || publicBytes != nil || privateBytes != nil {
 			return ca, public, private, nil

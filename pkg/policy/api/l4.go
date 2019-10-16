@@ -73,19 +73,34 @@ func (a *K8sSecret) Equal(b *K8sSecret) bool {
 // or via filepath. If both are set, directory is given priority over
 // k8sSecrets.
 type TLSContext struct {
-	// K8sSecret is the secret that contains the certificates stored.
-	// Cilium will search in this secret for the following items:
+	// K8sSecret is the secret that contains the certificates and private key for the TLS context.
+	// By default, Cilium will search in this secret for the following items:
 	//  - 'ca.crt' - Which represents the trusted CA to verify remote source.
-	//  - 'public.crt' - Which represents the public key certificate.
-	//  - 'private.crt' - Which represents the private key certificate.
+	//  - 'tls.crt' - Which represents the public key certificate.
+	//  - 'tls.key' - Which represents the private key matching the public key certificate.
 	K8sSecret *K8sSecret `json:"k8sSecret,omitempty"`
 
 	// CertificatesPath is the directory name that contains the certificates.
-	// Cilium will search in this directory for the following files:
+	// By default, Cilium will search in this directory for the following files:
 	//  - 'ca.crt' - Which represents the trusted CA to verify remote source.
-	//  - 'public.crt' - Which represents the public key certificate.
-	//  - 'private.crt' - Which represents the private key certificate.
-	CertificatesPath *string `json:"directory,omitempty"`
+	//  - 'tls.crt' - Which represents the public key certificate.
+	//  - 'tls.key' - Which represents the private key matching the public key certificate.
+	CertificatesPath string `json:"directory,omitempty"`
+
+	// TrustedCA is the file name or k8s secret item name for the trusted CA.
+	// If omitted, 'ca.crt' is assumed, if it exists.
+	// If given, the item must exist.
+	TrustedCA string `json:"trustedCA,omitempty"`
+
+	// Certificate is the file name or k8s secret item name for the certificate chain.
+	// If omitted, 'tls.crt' is assumed, if it exists.
+	// If given, the item must exist.
+	Certificate string `json:"certificate,omitempty"`
+
+	// PrivateKey is the file name or k8s secret item name for the private key matching the certificate chain.
+	// If omitted, 'tls.key' is assumed, if it exists.
+	// If given, the item must exist.
+	PrivateKey string `json:"privateKey,omitempty"`
 }
 
 // Equal returns true if 'a' and 'b' have the same contents.

@@ -748,11 +748,6 @@ func (in *TLSContext) DeepCopyInto(out *TLSContext) {
 		*out = new(K8sSecret)
 		**out = **in
 	}
-	if in.CertificatesPath != nil {
-		in, out := &in.CertificatesPath, &out.CertificatesPath
-		*out = new(string)
-		**out = **in
-	}
 	return
 }
 
