@@ -38,6 +38,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint/connector"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/endpointmanager"
+	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/fqdn"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/identity/cache"
@@ -344,7 +345,9 @@ func NewDaemon(dp datapath.Datapath, iptablesManager rulesManager) (*Daemon, *en
 	}
 
 	d.identityAllocator = cache.NewCachingIdentityAllocator(&d)
-	d.policy = policy.NewPolicyRepository(d.identityAllocator.GetIdentityCache())
+	d.policy = policy.NewPolicyRepository(d.identityAllocator.GetIdentityCache(),
+		certificatemanager.NewManager(option.Config.CertDirectory, k8s.Client()))
+	d.policy.SetEnvoyRulesFunc(envoy.GetEnvoyHTTPRules)
 
 	// Propagate identity allocator down to packages which themselves do not
 	// have types to which we can add an allocator member.
@@ -456,8 +459,7 @@ func NewDaemon(dp datapath.Datapath, iptablesManager rulesManager) (*Daemon, *en
 	// FIXME: Make the port range configurable.
 	if option.Config.InstallIptRules {
 		d.l7Proxy = proxy.StartProxySupport(10000, 20000, option.Config.RunDir,
-			option.Config.AccessLog, &d, option.Config.AgentLabels, d.datapath, d.endpointManager,
-			certificatemanager.NewManager(option.Config.CertDirectory, k8s.Client()))
+			option.Config.AccessLog, &d, option.Config.AgentLabels, d.datapath, d.endpointManager)
 	} else {
 		log.Warning("L7 proxies not supported when --install-iptables-rules=\"false\"")
 	}

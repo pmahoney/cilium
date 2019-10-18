@@ -24,7 +24,7 @@ import (
 )
 
 func (s *EndpointSuite) TestUpdateVisibilityPolicy(c *check.C) {
-	ep := NewEndpointWithState(&DummyOwner{repo: policy.NewPolicyRepository(nil)}, nil, &allocator.FakeIdentityAllocator{}, 12345, StateReady)
+	ep := NewEndpointWithState(&DummyOwner{repo: policy.NewPolicyRepository(nil, nil)}, nil, &allocator.FakeIdentityAllocator{}, 12345, StateReady)
 	ep.UpdateVisibilityPolicy("")
 	c.Assert(ep.visibilityPolicy, check.IsNil)
 

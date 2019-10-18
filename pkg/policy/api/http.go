@@ -16,6 +16,17 @@ package api
 
 import "regexp"
 
+// SecretHeader specifies a matching requirement of a named header
+// field to a secret value
+type SecretHeader struct {
+	// Name identifies the header
+	Name string `json:"name,omitempty"`
+
+	// Secret refers to a k8s secret that contains the value to be matched against.
+	// The secret must only contain one entry.
+	Secret *K8sSecret `json:"secret,omitempty"`
+}
+
 // PortRuleHTTP is a list of HTTP protocol constraints. All fields are
 // optional, if all fields are empty or missing, the rule does not have any
 // effect.
@@ -57,6 +68,14 @@ type PortRuleHTTP struct {
 	//
 	// +optional
 	Headers []string `json:"headers,omitempty"`
+
+	// SecretHeaders is a list of HTTP headers which must be
+	// present and match against the given k8s secret values. If
+	// omitted or empty, requests are allowed regardless of
+	// headers present.
+	//
+	// +optional
+	SecretHeaders []*SecretHeader `json:"secretHeaders,omitempty"`
 }
 
 // Sanitize sanitizes HTTP rules. It ensures that the path and method fields

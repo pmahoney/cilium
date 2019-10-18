@@ -44,9 +44,9 @@ type selectorPolicy struct {
 	EgressPolicyEnabled bool
 }
 
-func (p *selectorPolicy) Attach() {
+func (p *selectorPolicy) Attach(policyCtx PolicyContext) {
 	if p.L4Policy != nil {
-		p.L4Policy.Attach()
+		p.L4Policy.Attach(policyCtx)
 	}
 }
 

@@ -67,11 +67,11 @@ type EndpointSuite struct {
 }
 
 // suite can be used by testing.T benchmarks or tests as a mock regeneration.Owner
-var suite = EndpointSuite{repo: policy.NewPolicyRepository(nil)}
+var suite = EndpointSuite{repo: policy.NewPolicyRepository(nil, nil)}
 var _ = Suite(&suite)
 
 func (s *EndpointSuite) SetUpSuite(c *C) {
-	s.repo = policy.NewPolicyRepository(nil)
+	s.repo = policy.NewPolicyRepository(nil, nil)
 }
 
 func (s *EndpointSuite) GetPolicyRepository() *policy.Repository {

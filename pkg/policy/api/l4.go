@@ -58,15 +58,13 @@ func (p PortProtocol) Covers(other PortProtocol) bool {
 // K8sSecret is a reference to a k8s secret.
 type K8sSecret struct {
 	// Namespace is the k8s namespace in which the secret exists.
-	Namespace string `json:"namespace"`
+	// Context of use determines the default value if left out (e.g., "default")
+	//
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 
 	// Name is the name of the k8s secret.
 	Name string `json:"name"`
-}
-
-// Equal returns true if 'a' and 'b' have the same contents.
-func (a *K8sSecret) Equal(b *K8sSecret) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 // TLSContext provides TLS configuration via reference to either k8s secrets
@@ -101,14 +99,6 @@ type TLSContext struct {
 	// If omitted, 'tls.key' is assumed, if it exists.
 	// If given, the item must exist.
 	PrivateKey string `json:"privateKey,omitempty"`
-}
-
-// Equal returns true if 'a' and 'b' have the same contents.
-func (a *TLSContext) Equal(b *TLSContext) bool {
-	return a == nil && b == nil || a != nil && b != nil && a.K8sSecret.Equal(b.K8sSecret) &&
-		(a.CertificatesPath == nil && b.CertificatesPath == nil ||
-			a.CertificatesPath != nil && b.CertificatesPath != nil &&
-				*a.CertificatesPath == *b.CertificatesPath)
 }
 
 // PortRule is a list of ports/protocol combinations with optional Layer 7

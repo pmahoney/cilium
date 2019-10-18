@@ -973,7 +973,8 @@ var (
 	K8sSecret = map[string]apiextensionsv1beta1.JSONSchemaProps{
 		"namespace": {
 			Description: "Namespace is the k8s namespace in which the secret exists. If " +
-				"namespace is omitted, the namespace of the enclosing rule is assumed.",
+				"namespace is omitted, the namespace of the enclosing rule is assumed, " +
+				"or \"default\", if none applies.",
 			Type: "string",
 		},
 		"name": {
@@ -1046,6 +1047,18 @@ var (
 		},
 	}
 
+	SecretHeader = map[string]apiextensionsv1beta1.JSONSchemaProps{
+		"name": {
+			Description: "Name identifies the header.",
+			Type:        "string",
+		},
+		"secret": {
+			Description: "Secret refers to a k8s secret that contains the value to be matched against.",
+			Type:        "object",
+			Properties:  K8sSecret,
+		},
+	}
+
 	PortRuleHTTP = apiextensionsv1beta1.JSONSchemaProps{
 		Description: "PortRuleHTTP is a list of HTTP protocol constraints. All fields are " +
 			"optional, if all fields are empty or missing, the rule does not have any effect." +
@@ -1055,6 +1068,18 @@ var (
 			"characters disallowed from the conventional \"path\" part of a URL as defined by " +
 			"RFC 3986.",
 		Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
+			"secretHeaders": {
+				Description: "SecretHeaders is a list of HTTP headers which must be present and match " +
+					"against the given k8s secret values. If omitted or empty, requests are allowed " +
+					"regardless of headers present.",
+				Type: "array",
+				Items: &apiextensionsv1beta1.JSONSchemaPropsOrArray{
+					Schema: &apiextensionsv1beta1.JSONSchemaProps{
+						Type:       "object",
+						Properties: SecretHeader,
+					},
+				},
+			},
 			"headers": {
 				Description: "Headers is a list of HTTP headers which must be present in the " +
 					"request. If omitted or empty, requests are allowed regardless of headers " +

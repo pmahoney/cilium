@@ -42,8 +42,8 @@ func (rules ruleSlice) wildcardL3L4Rules(ingress bool, l4Policy L4PolicyMap, req
 
 				// L3-only rule.
 				if len(rule.ToPorts) == 0 && len(fromEndpoints) > 0 {
-					wildcardL3L4Rule(api.ProtoTCP, 0, nil, nil, fromEndpoints, ruleLabels, l4Policy, selectorCache)
-					wildcardL3L4Rule(api.ProtoUDP, 0, nil, nil, fromEndpoints, ruleLabels, l4Policy, selectorCache)
+					wildcardL3L4Rule(api.ProtoTCP, 0, fromEndpoints, ruleLabels, l4Policy, selectorCache)
+					wildcardL3L4Rule(api.ProtoUDP, 0, fromEndpoints, ruleLabels, l4Policy, selectorCache)
 				} else {
 					// L4-only or L3-dependent L4 rule.
 					//
@@ -58,7 +58,7 @@ func (rules ruleSlice) wildcardL3L4Rules(ingress bool, l4Policy L4PolicyMap, req
 							for _, p := range toPort.Ports {
 								// Already validated via PortRule.Validate().
 								port, _ := strconv.ParseUint(p.Port, 0, 16)
-								wildcardL3L4Rule(p.Protocol, int(port), toPort.TerminatingTLS, toPort.OriginatingTLS, fromEndpoints, ruleLabels, l4Policy, selectorCache)
+								wildcardL3L4Rule(p.Protocol, int(port), fromEndpoints, ruleLabels, l4Policy, selectorCache)
 							}
 						}
 					}
@@ -76,8 +76,8 @@ func (rules ruleSlice) wildcardL3L4Rules(ingress bool, l4Policy L4PolicyMap, req
 
 				// L3-only rule.
 				if len(rule.ToPorts) == 0 && len(toEndpoints) > 0 {
-					wildcardL3L4Rule(api.ProtoTCP, 0, nil, nil, toEndpoints, ruleLabels, l4Policy, selectorCache)
-					wildcardL3L4Rule(api.ProtoUDP, 0, nil, nil, toEndpoints, ruleLabels, l4Policy, selectorCache)
+					wildcardL3L4Rule(api.ProtoTCP, 0, toEndpoints, ruleLabels, l4Policy, selectorCache)
+					wildcardL3L4Rule(api.ProtoUDP, 0, toEndpoints, ruleLabels, l4Policy, selectorCache)
 				} else {
 					// L4-only or L3-dependent L4 rule.
 					//
@@ -92,7 +92,7 @@ func (rules ruleSlice) wildcardL3L4Rules(ingress bool, l4Policy L4PolicyMap, req
 							for _, p := range toPort.Ports {
 								// Already validated via PortRule.Validate().
 								port, _ := strconv.ParseUint(p.Port, 0, 16)
-								wildcardL3L4Rule(p.Protocol, int(port), toPort.TerminatingTLS, toPort.OriginatingTLS, toEndpoints, ruleLabels, l4Policy, selectorCache)
+								wildcardL3L4Rule(p.Protocol, int(port), toEndpoints, ruleLabels, l4Policy, selectorCache)
 							}
 						}
 					}
@@ -102,7 +102,7 @@ func (rules ruleSlice) wildcardL3L4Rules(ingress bool, l4Policy L4PolicyMap, req
 	}
 }
 
-func (rules ruleSlice) resolveL4IngressPolicy(ctx *SearchContext, revision uint64, selectorCache *SelectorCache) (L4PolicyMap, error) {
+func (rules ruleSlice) resolveL4IngressPolicy(policyCtx PolicyContext, ctx *SearchContext) (L4PolicyMap, error) {
 	result := L4PolicyMap{}
 
 	ctx.PolicyTrace("\n")
@@ -132,7 +132,7 @@ func (rules ruleSlice) resolveL4IngressPolicy(ctx *SearchContext, revision uint6
 	ctx.rulesSelect = true
 
 	for _, r := range matchedRules {
-		found, err := r.resolveIngressPolicy(ctx, &state, result, requirements, selectorCache)
+		found, err := r.resolveIngressPolicy(policyCtx, ctx, &state, result, requirements)
 		if err != nil {
 			return nil, err
 		}
@@ -142,7 +142,7 @@ func (rules ruleSlice) resolveL4IngressPolicy(ctx *SearchContext, revision uint6
 		}
 	}
 
-	matchedRules.wildcardL3L4Rules(true, result, requirements, selectorCache)
+	matchedRules.wildcardL3L4Rules(true, result, requirements, policyCtx.GetSelectorCache())
 
 	state.trace(len(rules), ctx)
 
@@ -152,7 +152,7 @@ func (rules ruleSlice) resolveL4IngressPolicy(ctx *SearchContext, revision uint6
 	return result, nil
 }
 
-func (rules ruleSlice) resolveL4EgressPolicy(ctx *SearchContext, revision uint64, selectorCache *SelectorCache) (L4PolicyMap, error) {
+func (rules ruleSlice) resolveL4EgressPolicy(policyCtx PolicyContext, ctx *SearchContext) (L4PolicyMap, error) {
 	result := L4PolicyMap{}
 
 	ctx.PolicyTrace("\n")
@@ -183,7 +183,7 @@ func (rules ruleSlice) resolveL4EgressPolicy(ctx *SearchContext, revision uint64
 
 	for i, r := range matchedRules {
 		state.ruleID = i
-		found, err := r.resolveEgressPolicy(ctx, &state, result, requirements, selectorCache)
+		found, err := r.resolveEgressPolicy(policyCtx, ctx, &state, result, requirements)
 		if err != nil {
 			return nil, err
 		}
@@ -193,7 +193,7 @@ func (rules ruleSlice) resolveL4EgressPolicy(ctx *SearchContext, revision uint64
 		}
 	}
 
-	matchedRules.wildcardL3L4Rules(false, result, requirements, selectorCache)
+	matchedRules.wildcardL3L4Rules(false, result, requirements, policyCtx.GetSelectorCache())
 
 	state.trace(len(rules), ctx)
 
