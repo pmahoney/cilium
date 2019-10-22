@@ -150,19 +150,6 @@ func (c *CNPStatusUpdateContext) prepareUpdate(cnp *types.SlimCNP, scopedLog *lo
 }
 
 func (c *CNPStatusUpdateContext) updateStatus(ctx context.Context, cnp *types.SlimCNP, rev uint64, policyImportErr, waitForEPsErr error) (err error) {
-	var m *UpdateMetadata
-
-	if option.Config.K8sEventHandover {
-		m = &UpdateMetadata{
-			typ: KVStore,
-			ctx: ctx,
-		}
-	} else {
-		m = &UpdateMetadata{
-			typ: K8sAPIServer,
-		}
-	}
-
 	// Update the status of whether the rule is enforced on this node.  If
 	// we are unable to parse the CNP retrieved from the store, or if
 	// endpoints did not reach the desired policy revision after 30
@@ -171,12 +158,20 @@ func (c *CNPStatusUpdateContext) updateStatus(ctx context.Context, cnp *types.Sl
 		// OK is false here because the policy wasn't imported into
 		// cilium on this node; since it wasn't imported, it also isn't
 		// enforced.
-		err = c.update(m, cnp, false, false, policyImportErr, rev, cnp.Annotations)
+		if option.Config.K8sEventHandover {
+			err = c.updateViaKVStore(ctx, cnp, false, false, policyImportErr, rev, cnp.Annotations)
+		} else {
+			err = c.updateViaAPIServer(cnp, false, false, policyImportErr, rev, cnp.Annotations)
+		}
 	} else {
 		// If the deadline by the above context, then not all endpoints
 		// are enforcing the given policy, and waitForEpsErr will be
 		// non-nil.
-		err = c.update(m, cnp, waitForEPsErr == nil, true, waitForEPsErr, rev, cnp.Annotations)
+		if option.Config.K8sEventHandover {
+			err = c.updateViaKVStore(ctx, cnp, waitForEPsErr == nil, true, waitForEPsErr, rev, cnp.Annotations)
+		} else {
+			err = c.updateViaAPIServer(cnp, waitForEPsErr == nil, true, waitForEPsErr, rev, cnp.Annotations)
+		}
 	}
 
 	return
@@ -293,42 +288,58 @@ func formatKeyForKvstore(uid k8sTypes.UID, namespace, name, nodeName string) str
 	return path.Join(CNPStatusesPath, string(uid), namespace, name, nodeName)
 }
 
-// UpdateMetadata contains information about how the update for the NodeStatus
-// in a CNP will be propagated.
-type UpdateMetadata struct {
-	typ UpdateType
-	ctx context.Context
+func (c *CNPStatusUpdateContext) updateViaAPIServer(cnp *types.SlimCNP, enforcing, ok bool, cnpError error, rev uint64, cnpAnnotations map[string]string) error {
+	var (
+		cnpns       cilium_v2.CiliumNetworkPolicyNodeStatus
+		annotations map[string]string
+	)
+	capabilities := k8sversion.Capabilities()
+
+	switch {
+	case cnpAnnotations == nil:
+		// don't bother doing anything if cnpAnnotations is nil.
+	case capabilities.Patch:
+		// in k8s versions that support JSON Patch we can safely modify the
+		// cnpAnnotations as the CNP, along with these annotations, is not sent to
+		// k8s api-server.
+		annotations = cnpAnnotations
+		lastAppliedConfig, ok := annotations[v1.LastAppliedConfigAnnotation]
+		defer func() {
+			if ok {
+				cnpAnnotations[v1.LastAppliedConfigAnnotation] = lastAppliedConfig
+			}
+		}()
+	default:
+		// for all other k8s versions, sense the CNP is sent with the
+		// annotations we need to make a deepcopy.
+		m := make(map[string]string, len(cnpAnnotations))
+		for k, v := range cnpAnnotations {
+			m[k] = v
+		}
+		annotations = m
+	}
+
+	// Ignore LastAppliedConfigAnnotation as it can be really costly to upload
+	// this as part of the status.
+	delete(annotations, v1.LastAppliedConfigAnnotation)
+
+	cnpns = cilium_v2.CreateCNPNodeStatus(enforcing, ok, cnpError, rev, annotations)
+
+	ns := k8sUtils.ExtractNamespace(&cnp.ObjectMeta)
+	return updateStatusesByCapabilities(c.CiliumNPClient, capabilities, cnp, ns, cnp.GetName(), map[string]cilium_v2.CiliumNetworkPolicyNodeStatus{c.NodeName: cnpns})
+
 }
 
-// UpdateType encodes the type of an update of CNP NodeStatus.
-type UpdateType string
-
-const (
-	// K8sAPIServer specifies that the update for a CNPNodeStatus will be sent
-	// to kube-apiserver.
-	K8sAPIServer = UpdateType("K8sAPIServer")
-
-	// Kvstore specifies that the update for a CNPNodeStatus will be sent
-	// to the kvstore.
-	KVStore = UpdateType("KVStore")
-)
-
-func (c *CNPStatusUpdateContext) update(m *UpdateMetadata, cnp *types.SlimCNP, enforcing, ok bool, cnpError error, rev uint64, cnpAnnotations map[string]string) error {
+func (c *CNPStatusUpdateContext) updateViaKVStore(ctx context.Context, cnp *types.SlimCNP, enforcing, ok bool, cnpError error, rev uint64, cnpAnnotations map[string]string) error {
 	var (
 		cnpns       cilium_v2.CiliumNetworkPolicyNodeStatus
 		annotations map[string]string
 	)
 
-	switch m.typ {
-	case KVStore:
-		select {
-		case <-kvstore.Client().Connected():
-		case <-m.ctx.Done():
-			return m.ctx.Err()
-		}
-	case K8sAPIServer:
-	default:
-		return fmt.Errorf("unknown UpdateType: %s", m.typ)
+	select {
+	case <-kvstore.Client().Connected():
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	capabilities := k8sversion.Capabilities()
@@ -363,32 +374,24 @@ func (c *CNPStatusUpdateContext) update(m *UpdateMetadata, cnp *types.SlimCNP, e
 
 	cnpns = cilium_v2.CreateCNPNodeStatus(enforcing, ok, cnpError, rev, annotations)
 
-	switch m.typ {
-	case K8sAPIServer:
-		ns := k8sUtils.ExtractNamespace(&cnp.ObjectMeta)
-		return updateStatusesByCapabilities(c.CiliumNPClient, capabilities, cnp, ns, cnp.GetName(), map[string]cilium_v2.CiliumNetworkPolicyNodeStatus{c.NodeName: cnpns})
-	case KVStore:
-		cnpWithMeta := CNPNSWithMeta{
-			Name:                          cnp.GetName(),
-			Namespace:                     cnp.GetNamespace(),
-			UID:                           cnp.GetUID(),
-			CiliumNetworkPolicyNodeStatus: cnpns,
-			Node:                          node.GetName(),
-		}
-		marshaledVal, err := json.Marshal(cnpWithMeta)
-		if err != nil {
-			return err
-		}
-
-		key := formatKeyForKvstore(cnp.UID, cnp.Namespace, cnp.Name, node.GetName())
-		log.WithFields(logrus.Fields{
-			"key":   key,
-			"value": marshaledVal,
-		}).Debug("updating CNPStatus in kvstore")
-		return kvstore.Client().Update(m.ctx, key, marshaledVal, true)
-	default:
-		return fmt.Errorf("unhandled K8s UpdateType: %s", m.typ)
+	cnpWithMeta := CNPNSWithMeta{
+		Name:                          cnp.GetName(),
+		Namespace:                     cnp.GetNamespace(),
+		UID:                           cnp.GetUID(),
+		CiliumNetworkPolicyNodeStatus: cnpns,
+		Node:                          node.GetName(),
 	}
+	marshaledVal, err := json.Marshal(cnpWithMeta)
+	if err != nil {
+		return err
+	}
+
+	key := formatKeyForKvstore(cnp.UID, cnp.Namespace, cnp.Name, node.GetName())
+	log.WithFields(logrus.Fields{
+		"key":   key,
+		"value": marshaledVal,
+	}).Debug("updating CNPStatus in kvstore")
+	return kvstore.Client().Update(ctx, key, marshaledVal, true)
 }
 
 // CNPNSWithMeta is a wrapper around a CiliumNetworkPolicyNodeStatus with
