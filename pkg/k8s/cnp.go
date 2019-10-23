@@ -284,6 +284,10 @@ retryLoop:
 // representing CNPStatus state for all nodes in the cluster.
 var CNPStatusesPath = path.Join(kvstore.BaseKeyPrefix, "state", "cnpstatuses", "v2")
 
+func generateCNPKey(uid, namespace, name string) string {
+	return path.Join(uid, namespace, name)
+}
+
 func formatKeyForKvstore(uid k8sTypes.UID, namespace, name, nodeName string) string {
 	return path.Join(CNPStatusesPath, string(uid), namespace, name, nodeName)
 }
@@ -304,11 +308,11 @@ func (c *CNPStatusUpdateContext) updateViaAPIServer(cnp *types.SlimCNP, enforcin
 		// k8s api-server.
 		annotations = cnpAnnotations
 		lastAppliedConfig, ok := annotations[v1.LastAppliedConfigAnnotation]
-		defer func() {
-			if ok {
+		if ok {
+			defer func() {
 				cnpAnnotations[v1.LastAppliedConfigAnnotation] = lastAppliedConfig
-			}
-		}()
+			}()
+		}
 	default:
 		// for all other k8s versions, sense the CNP is sent with the
 		// annotations we need to make a deepcopy.
@@ -409,7 +413,7 @@ type CNPNSWithMeta struct {
 // GetKeyName returns the uniquely identifying information of this CNPNSWithMeta
 // as a string for use as a key in a map.
 func (c *CNPNSWithMeta) GetKeyName() string {
-	return path.Join(string(c.UID), c.Namespace, c.Name, c.Node)
+	return path.Join(generateCNPKey(string(c.UID), c.Namespace, c.Name), c.Node)
 }
 
 // Marshal marshals the CNPNSWithMeta into JSON form.

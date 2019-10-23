@@ -152,7 +152,7 @@ restart:
 
 				// Send the update to the corresponding controller for the
 				// CNP which sends all status updates to the K8s apiserver.
-				cnpKey := fmt.Sprintf("%s/%s/%s", cnpStatusUpdate.UID, cnpStatusUpdate.Namespace, cnpStatusUpdate.Name)
+				cnpKey := generateCNPKey(string(cnpStatusUpdate.UID), cnpStatusUpdate.Namespace, cnpStatusUpdate.Name)
 				updater, ok := c.eventMap.lookup(cnpKey)
 				if !ok {
 					log.WithField("cnp", cnpKey).Debug("received event from kvstore for cnp for which we do not have any updater goroutine")
@@ -237,21 +237,6 @@ func (c *CNPStatusEventHandler) runStatusHandler(cnpKey string, cnp *types.SlimC
 		}
 	}
 	for {
-		// If nothing to update, wait until we have something to update.
-		if len(nodeStatusMap) == 0 {
-
-			// Wait for one status update to occur.
-			select {
-			case <-nodeStatusUpdater.stopChan:
-				return
-			case ev, ok := <-nodeStatusUpdater.updateChan:
-				if !ok {
-					return
-				}
-				nodeStatusMap[ev.node] = *ev.CiliumNetworkPolicyNodeStatus
-			}
-		}
-
 		// Allow for a bunch of different node status updates to come before
 		// we break out to avoid jitter in updates across the cluster
 		// to affect batching on our end.
@@ -265,6 +250,11 @@ func (c *CNPStatusEventHandler) runStatusHandler(cnpKey string, cnp *types.SlimC
 			case <-nodeStatusUpdater.stopChan:
 				return
 			case <-limit:
+				if len(nodeStatusMap) == 0 {
+					// If nothing to update, wait until we have something to update.
+					limit = nil
+					continue
+				}
 				break Loop
 			case ev, ok := <-nodeStatusUpdater.updateChan:
 				if !ok {
@@ -313,7 +303,7 @@ func (c *CNPStatusEventHandler) runStatusHandler(cnpKey string, cnp *types.SlimC
 // given CNP to the Kubernetes APIserver. If a status handler has already been
 // started, it is a no-op.
 func (c *CNPStatusEventHandler) StartStatusHandler(cnp *types.SlimCNP) {
-	cnpKey := path.Join(string(cnp.UID), cnp.Namespace, cnp.Name)
+	cnpKey := generateCNPKey(string(cnp.UID), cnp.Namespace, cnp.Name)
 	nodeStatusUpdater, ok := c.eventMap.createIfNotExist(cnpKey)
 	if ok {
 		return
