@@ -66,8 +66,7 @@ func enableCNPWatcher() error {
 	cnpSharedStore, err := store.JoinSharedStore(store.Configuration{
 		Prefix: k8s.CNPStatusesPath,
 		KeyCreator: func() store.Key {
-			newCNPNS := k8s.CNPNSWithMeta{}
-			return &newCNPNS
+			return &k8s.CNPNSWithMeta{}
 		},
 	})
 	if err != nil {
