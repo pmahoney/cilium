@@ -1497,8 +1497,29 @@ func (e *Endpoint) ModifyIdentityLabels(addLabels, delLabels pkgLabels.Labels) e
 		// completed
 		e.setState(StateWaitingForIdentity, "Triggering identity resolution due to updated identity labels")
 
-		e.identityRevision++
-		rev = e.identityRevision
+		if e.IsInit() {
+			// If the user has added a new label which is considered part of
+			// the endpoint's identity then we can safely remove the init or added
+			// in case the endpoint gets 0 identity labels.
+			idLabls := e.OpLabels.IdentityLabels()
+			delete(idLabls, pkgLabels.IDNameInit)
+			// replace identity labels and update the identity if labels have changed
+			rev = e.replaceIdentityLabels(idLabls)
+		} else {
+			e.identityRevision++
+			rev = e.identityRevision
+		}
+	} else {
+		if len(addLabels) == 0 && len(delLabels) == 0 && e.IsInit() {
+			// If the user has added a new label which is considered part of
+			// the endpoint's identity then we can safely remove the init or added
+			// in case the endpoint gets 0 identity labels.
+			idLabls := e.OpLabels.IdentityLabels()
+			delete(idLabls, pkgLabels.IDNameInit)
+			// replace identity labels and update the identity if labels have changed
+			rev = e.replaceIdentityLabels(idLabls)
+			changed = true
+		}
 	}
 	e.unlock()
 

@@ -647,10 +647,10 @@ func checkLabels(add, del labels.Labels) (addLabels, delLabels labels.Labels, ok
 // endpoint's labels.
 // Returns an HTTP response code and an error msg (or nil on success).
 func (d *Daemon) modifyEndpointIdentityLabelsFromAPI(id string, add, del labels.Labels) (int, error) {
-	addLabels, delLabels, ok := checkLabels(add, del)
-	if !ok {
-		return 0, nil
-	}
+	addLabels, delLabels, _ := checkLabels(add, del)
+	// if !ok {
+	// 	return 0, nil
+	// }
 	if lbls := addLabels.FindReserved(); lbls != nil {
 		return PatchEndpointIDLabelsUpdateFailedCode, fmt.Errorf("Not allowed to add reserved labels: %s", lbls)
 	} else if lbls := delLabels.FindReserved(); lbls != nil {

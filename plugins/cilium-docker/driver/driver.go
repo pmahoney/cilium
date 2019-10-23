@@ -15,6 +15,7 @@
 package driver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -28,11 +29,15 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/route"
 	"github.com/cilium/cilium/pkg/endpoint/connector"
 	endpointIDPkg "github.com/cilium/cilium/pkg/endpoint/id"
+	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
 
+	apiTypes "github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/events"
+	dockerCliAPI "github.com/docker/docker/client"
 	"github.com/docker/libnetwork/drivers/remote/api"
 	lnTypes "github.com/docker/libnetwork/types"
 	"github.com/gorilla/mux"
@@ -48,12 +53,13 @@ type Driver interface {
 }
 
 type driver struct {
-	mutex       lock.RWMutex
-	client      *client.Client
-	conf        models.DaemonConfigurationStatus
-	routes      []api.StaticRoute
-	gatewayIPv6 string
-	gatewayIPv4 string
+	mutex        lock.RWMutex
+	client       *client.Client
+	dockerClient *dockerCliAPI.Client
+	conf         models.DaemonConfigurationStatus
+	routes       []api.StaticRoute
+	gatewayIPv6  string
+	gatewayIPv4  string
 }
 
 func endpointID(id string) string {
@@ -77,19 +83,28 @@ func newLibnetworkRoute(route route.Route) api.StaticRoute {
 // NewDriver creates and returns a new Driver for the given API URL.
 // If url is nil then use SockPath provided by CILIUM_SOCK
 // or the cilium default SockPath
-func NewDriver(url string) (Driver, error) {
+func NewDriver(ciliumSockPath, dockerHostPath string) (Driver, error) {
 
-	if url == "" {
-		url = client.DefaultSockPath()
+	if ciliumSockPath == "" {
+		ciliumSockPath = client.DefaultSockPath()
 	}
 
-	scopedLog := log.WithField("url", url)
-	c, err := client.NewClient(url)
+	scopedLog := log.WithField("ciliumSockPath", ciliumSockPath)
+	c, err := client.NewClient(ciliumSockPath)
 	if err != nil {
 		scopedLog.WithError(err).Fatal("Error while starting cilium-client")
 	}
 
-	d := &driver{client: c}
+	scopedLog = scopedLog.WithField("dockerHostPath", dockerHostPath)
+	dockerCli, err := dockerCliAPI.NewClientWithOpts(
+		dockerCliAPI.WithVersion("v1.21"),
+		dockerCliAPI.WithHost(dockerHostPath),
+	)
+	if err != nil {
+		scopedLog.WithError(err).Fatal("Error while starting cilium-client")
+	}
+
+	d := &driver{client: c, dockerClient: dockerCli}
 
 	for tries := 0; tries < 24; tries++ {
 		if res, err := c.ConfigGet(); err != nil {
@@ -114,6 +129,76 @@ func NewDriver(url string) (Driver, error) {
 	}
 
 	d.updateRoutes(nil)
+
+	log.Info("Starting docker events watcher")
+
+	go func() {
+		eventsCh, errCh := dockerCli.Events(context.Background(), apiTypes.EventsOptions{})
+		for {
+			select {
+			case err := <-errCh:
+				log.WithError(err).Error("Unable to connect to docker events channel, reconnecting...")
+				time.Sleep(5 * time.Second)
+				eventsCh, errCh = dockerCli.Events(context.Background(), apiTypes.EventsOptions{})
+			case event := <-eventsCh:
+				if event.Type != events.ContainerEventType || event.Action != "start" {
+					break
+				}
+				log = log.WithFields(logrus.Fields{"event": fmt.Sprintf("%+v", event)})
+				cont, err := dockerCli.ContainerInspect(context.Background(), event.Actor.ID)
+				if err != nil {
+					log.WithFields(
+						logrus.Fields{
+							"container-id": event.Actor.ID,
+						},
+					).WithError(err).Error("Unable to inspect container")
+				}
+				if cont.Config == nil || cont.NetworkSettings == nil {
+					break
+				}
+				var epID string
+				for _, network := range cont.NetworkSettings.Networks {
+					epID = network.EndpointID
+					break
+				}
+				image, _, err := dockerCli.ImageInspectWithRaw(context.Background(), cont.Config.Image)
+				if err != nil {
+					log.WithFields(
+						logrus.Fields{
+							"image-id": cont.Config.Image,
+						},
+					).WithError(err).Error("Unable to inspect image")
+				}
+				lbls := cont.Config.Labels
+				if image.Config != nil && image.Config.Labels != nil {
+					lbls = image.Config.Labels
+					// container labels overwrite image labels
+					for k, v := range cont.Config.Labels {
+						lbls[k] = v
+					}
+				}
+				addLbls := labels.Map2Labels(lbls, labels.LabelSourceContainer).GetModel()
+				ecr := &models.EndpointChangeRequest{
+					ContainerID:   event.Actor.ID,
+					ContainerName: event.Actor.Attributes["name"],
+					Labels:        addLbls,
+					State:         models.EndpointStateWaitingForIdentity,
+				}
+				err = d.client.EndpointPatch(endpointID(epID), ecr)
+				if err != nil {
+					log.WithFields(
+						logrus.Fields{
+							"container-id": event.Actor.ID,
+							"endpoint-id":  epID,
+							"labels":       cont.Config.Labels,
+							"error":        err,
+						}).
+						Error("Error while patching the endpoint labels of container")
+					break
+				}
+			}
+		}
+	}()
 
 	log.Infof("Cilium Docker plugin ready")
 

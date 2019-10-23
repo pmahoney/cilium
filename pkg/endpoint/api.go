@@ -135,6 +135,13 @@ func NewEndpointFromChangeModel(ctx context.Context, owner regeneration.Owner, p
 		ep.DatapathConfiguration = *base.DatapathConfiguration
 	}
 
+	if base.Labels != nil {
+		lbls := labels.NewLabelsFromModel(base.Labels)
+		identityLabels, infoLabels := labels.FilterLabels(lbls)
+		ep.OpLabels.OrchestrationIdentity = identityLabels
+		ep.OpLabels.OrchestrationInfo = infoLabels
+	}
+
 	ep.SetDefaultOpts(option.Config.Opts)
 
 	ep.UpdateLogger(nil)
@@ -510,8 +517,9 @@ func (e *Endpoint) ProcessChangeRequest(newEp *Endpoint, validPatchTransitionSta
 		changed = true
 	}
 
-	// TODO: Do something with the labels?
-	// addLabels := labels.NewLabelsFromModel(params.Endpoint.Labels)
+	e.replaceInformationLabels(newEp.OpLabels.OrchestrationInfo)
+	rev := e.replaceIdentityLabels(newEp.OpLabels.IdentityLabels())
+	go e.runLabelsResolver(context.Background(), rev, false)
 
 	// If desired state is waiting-for-identity but identity is already
 	// known, bump it to ready state immediately to force re-generation

@@ -221,7 +221,7 @@ func readLabelPrefixCfgFrom(fileName string) (*labelPrefixCfg, error) {
 }
 
 func (cfg *labelPrefixCfg) filterLabels(lbls Labels) (identityLabels, informationLabels Labels) {
-	if lbls == nil {
+	if len(lbls) == 0 {
 		return nil, nil
 	}
 
