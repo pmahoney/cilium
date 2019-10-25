@@ -36,7 +36,7 @@ var (
 
 // LBMap is the interface describing methods for manipulating service maps.
 type LBMap interface {
-	UpsertService(uint16, net.IP, uint16, []uint16, int, bool) error
+	UpsertService(uint16, net.IP, uint16, []uint16, int, bool, lb.SVCType) error
 	DeleteService(lb.L3n4AddrID, int) error
 	AddBackend(uint16, net.IP, uint16, bool) error
 	DeleteBackendByID(uint16, bool) error
@@ -56,7 +56,7 @@ type svcInfo struct {
 func (svc *svcInfo) deepCopyToLBSVC() *lb.SVC {
 	backends := make([]lb.Backend, len(svc.backends))
 	for i, backend := range svc.backends {
-		backends[i].L3n4Addr = *backend.DeepCopy()
+		backends[i].L3n4Addr = *backend.L3n4Addr.DeepCopy()
 		backends[i].ID = backend.ID
 	}
 	return &lb.SVC{
@@ -230,7 +230,7 @@ func (s *Service) UpsertService(
 	err = s.lbmap.UpsertService(
 		uint16(svc.frontend.ID), svc.frontend.L3n4Addr.IP, svc.frontend.L3n4Addr.L4Addr.Port,
 		backendIDs, prevBackendCount,
-		ipv6)
+		ipv6, svcType)
 	if err != nil {
 		return false, lb.ID(0), err
 	}

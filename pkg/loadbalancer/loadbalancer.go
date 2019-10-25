@@ -34,8 +34,9 @@ var (
 type SVCType string
 
 const (
-	SVCTypeClusterIP = SVCType("ClusterIP")
-	SVCTypeNodePort  = SVCType("NodePort")
+	SVCTypeClusterIP  = SVCType("ClusterIP")
+	SVCTypeNodePort   = SVCType("NodePort")
+	SVCTypExternalIPs = SVCType("ExternalIPs")
 )
 
 const (

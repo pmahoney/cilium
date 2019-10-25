@@ -69,6 +69,12 @@ type ServiceValue interface {
 	// Get reverse NAT identifier
 	GetRevNat() int
 
+	// Set flags
+	SetFlags(uint8)
+
+	// Get flags
+	GetFlags() uint8
+
 	// Set backend identifier
 	SetBackendID(id loadbalancer.BackendID)
 
@@ -161,4 +167,20 @@ func svcFrontendAndBackends(svcKey ServiceKey, svcValue ServiceValue,
 	}
 
 	return feL3n4AddrID, beBackend
+}
+
+const (
+	externalIPsMask = 1 << 0
+)
+
+func createSvcFlag(svcType loadbalancer.SVCType) uint8 {
+	var flags uint8
+	if svcType == loadbalancer.SVCTypExternalIPs {
+		flags |= externalIPsMask
+	}
+	return flags
+}
+
+func hasExternalIPsSet(flags uint8) bool {
+	return flags&externalIPsMask != 0
 }

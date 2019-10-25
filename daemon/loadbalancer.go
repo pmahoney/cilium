@@ -132,7 +132,6 @@ func (h *getService) Handle(params GetServiceParams) middleware.Responder {
 func getServiceList(svc *service.Service) []*models.Service {
 	svcs := svc.GetDeepCopyServices()
 	list := make([]*models.Service, 0, len(svcs))
-
 	for _, v := range svcs {
 		list = append(list, v.GetModel())
 	}
