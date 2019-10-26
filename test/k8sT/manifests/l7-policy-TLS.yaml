@@ -1,0 +1,50 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+description: "L7 policy for getting started using Kubernetes guide"
+metadata:
+  name: "l7-policy"
+spec:
+  endpointSelector:
+    matchLabels:
+      id: app1
+  egress:
+  - toPorts:
+    - ports:
+      - port: 53
+      rules:
+        dns:
+          - matchName: "www.lyft.com"
+  - toFQDNs:
+    - matchName: "www.lyft.com"
+    toPorts:
+    - ports:
+      - port: 443
+        protocol: "tcp"
+      terminatingTLS:
+        secret:
+          namespace: "default"
+          name: "test-server"
+      originatingTLS:
+        secret:
+	  namespace: "default"
+	  name: "test-client"
+      rules:
+        http:
+	- method: "GET"
+	  path: "/public"
+	  headerMatches:
+	  - mismatch: REPLACE
+            name: User-Agent
+	    value: "CuRL/x.y.z
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        id: app2
+    toPorts:
+    - ports:
+      - port: 443
+        protocol: TCP
+      rules:
+        http:
+        - method: "GET"
+          path: "/public"

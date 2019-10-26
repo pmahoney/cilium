@@ -43,6 +43,7 @@ var _ = Describe("K8sPolicyTest", func() {
 		l3Policy             string
 		l7Policy             string
 		l7PolicyKafka        string
+		l7PolicyTLS          string
 		serviceAccountPolicy string
 		knpDenyIngress       string
 		knpDenyEgress        string
@@ -67,6 +68,7 @@ var _ = Describe("K8sPolicyTest", func() {
 		l3Policy = helpers.ManifestGet(kubectl.BasePath(), "l3-l4-policy.yaml")
 		l7Policy = helpers.ManifestGet(kubectl.BasePath(), "l7-policy.yaml")
 		l7PolicyKafka = helpers.ManifestGet(kubectl.BasePath(), "l7-policy-kafka.yaml")
+		l7PolicyTLS = helpers.ManifestGet(kubectl.BasePath(), "l7-policy-TLS.yaml")
 		serviceAccountPolicy = helpers.ManifestGet(kubectl.BasePath(), "service-account.yaml")
 		knpDenyIngress = helpers.ManifestGet(kubectl.BasePath(), "knp-default-deny-ingress.yaml")
 		knpDenyEgress = helpers.ManifestGet(kubectl.BasePath(), "knp-default-deny-egress.yaml")
