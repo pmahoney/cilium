@@ -14,17 +14,50 @@
 
 package api
 
-import "regexp"
+import (
+	"fmt"
+	"regexp"
+)
 
-// SecretHeader specifies a matching requirement of a named header
-// field to a secret value
-type SecretHeader struct {
+// MismatchAction specifies what to do when there is no header match
+// Empty string is the default for making the rule to fail the match.
+// Otherwise the rule is still considered as matching, but the mismatches
+// are logged in the access log.
+type MismatchAction string
+
+const (
+	MismatchActionLog     MismatchAction = "LOG"     // Keep checking other matches
+	MismatchActionAdd     MismatchAction = "ADD"     // Add the missing value to a possibly multi-valued header
+	MismatchActionDelete  MismatchAction = "DELETE"  // Remove the whole mismatching header
+	MismatchActionReplace MismatchAction = "REPLACE" // Replace (of add if missing) the header
+)
+
+// HeaderMatch extends the HeaderValue for matching requirement of a
+// named header field against an immediate string, a secret value, or
+// a regex.  If none of the optional fields is present, then the
+// header value is not matched, only presence of the header is enough.
+type HeaderMatch struct {
+	// Mismatch identifies what to do in case there is no match. The
+	// default is to drop the request. Otherwise the overall rule is still
+	// considered as matching, but the mismatches
+	// are logged in the access log.
+	Mismatch MismatchAction `json:"mismatch,omitempty"`
+
 	// Name identifies the header
-	Name string `json:"name,omitempty"`
+	Name string `json:"name"`
 
 	// Secret refers to a k8s secret that contains the value to be matched against.
 	// The secret must only contain one entry.
+	// If the referred secret does not exist, and there is no "Value" specified, the match will fail.
+	//
+	// +optional
 	Secret *K8sSecret `json:"secret,omitempty"`
+
+	// Value matches the exact value of the header.
+	// Can be specified either alone or together with "Secret"; will be used as the header value if
+	// the secret can not be found in the latter case.
+	// +optional
+	Value string `json:"value,omitempty"`
 }
 
 // PortRuleHTTP is a list of HTTP protocol constraints. All fields are
@@ -69,13 +102,12 @@ type PortRuleHTTP struct {
 	// +optional
 	Headers []string `json:"headers,omitempty"`
 
-	// SecretHeaders is a list of HTTP headers which must be
-	// present and match against the given k8s secret values. If
-	// omitted or empty, requests are allowed regardless of
-	// headers present.
+	// HeaderMatches is a list of HTTP headers which must be
+	// present and match against the given values. Mismatch field can be used
+	// to specify what to do when there is no match.
 	//
 	// +optional
-	SecretHeaders []*SecretHeader `json:"secretHeaders,omitempty"`
+	HeaderMatches []*HeaderMatch `json:"headerMatches,omitempty"`
 }
 
 // Sanitize sanitizes HTTP rules. It ensures that the path and method fields
@@ -99,5 +131,21 @@ func (h *PortRuleHTTP) Sanitize() error {
 	}
 
 	// Headers are not sanitized.
+
+	// But HeaderMatches are
+	for _, m := range h.HeaderMatches {
+		if m.Name == "" {
+			return fmt.Errorf("Header name missing")
+		}
+		if m.Mismatch != "" &&
+			m.Mismatch != MismatchActionLog && m.Mismatch != MismatchActionAdd &&
+			m.Mismatch != MismatchActionDelete && m.Mismatch != MismatchActionReplace {
+			return fmt.Errorf("Invalid header action: %s", m.Mismatch)
+		}
+		if m.Secret != nil && m.Secret.Name == "" {
+			return fmt.Errorf("Secret name missing")
+		}
+	}
+
 	return nil
 }

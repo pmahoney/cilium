@@ -20,3 +20,9 @@ spec:
         http:
         - method: "POST"
           path: "/v1/request-landing"
+          headerMatches:
+          - mismatch: REPLACE
+            name: "User-Agent"
+            secret:
+              namespace: "default"
+              name: "user-agent"

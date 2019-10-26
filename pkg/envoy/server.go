@@ -481,9 +481,9 @@ func getL7Rule(l7 *api.PortRuleL7) *cilium.L7NetworkPolicyRule {
 	return rule
 }
 
-func getHTTPRule(certManager policy.CertificateManager, h *api.PortRuleHTTP) []*envoy_api_v2_route.HeaderMatcher {
+func getHTTPRule(certManager policy.CertificateManager, h *api.PortRuleHTTP) *cilium.HttpNetworkPolicyRule {
 	// Count the number of header matches we need
-	cnt := len(h.Headers) + len(h.SecretHeaders)
+	cnt := len(h.Headers) + len(h.HeaderMatches)
 	if h.Path != "" {
 		cnt++
 	}
@@ -522,26 +522,48 @@ func getHTTPRule(certManager policy.CertificateManager, h *api.PortRuleHTTP) []*
 				HeaderMatchSpecifier: &envoy_api_v2_route.HeaderMatcher_PresentMatch{PresentMatch: true}})
 		}
 	}
-	for _, hdr := range h.SecretHeaders {
+	for _, hdr := range h.HeaderMatches {
+		// Skip HeaderMatchers with an explicit mismatch action on the first round
+		if hdr.Mismatch != "" {
+			continue
+		}
 		// Fetch the secret
 		value := ""
 		var err error
-		if certManager == nil {
-			err = fmt.Errorf("Nil certManager")
-		} else {
-			value, err = certManager.GetSecretString(context.TODO(), hdr.Secret)
+		if hdr.Secret != nil {
+			if certManager == nil {
+				err = fmt.Errorf("HeaderMatches: Nil certManager")
+			} else {
+				value, err = certManager.GetSecretString(context.TODO(), hdr.Secret)
+			}
 		}
-		if err != nil {
-			log.WithError(err).Warning("Failed fetching K8s Secret, header match will fail")
-			// Envoy treats an empty exact match value as matching ANY value; adding
-			// InvertMatch: true here will cause this rule to NEVER match.
-			headers = append(headers, &envoy_api_v2_route.HeaderMatcher{Name: hdr.Name,
-				HeaderMatchSpecifier: &envoy_api_v2_route.HeaderMatcher_ExactMatch{ExactMatch: ""},
-				InvertMatch:          true})
-		} else {
+
+		// Only use Value if secret was not obtained
+		if value == "" && hdr.Value != "" {
+			value = hdr.Value
+			if err != nil {
+				log.WithError(err).Debug("HeaderMatches: Using a default value due to k8s secret not being available")
+				err = nil
+			}
+		}
+
+		if value != "" {
 			// Header presence and matching (literal) value needed.
 			headers = append(headers, &envoy_api_v2_route.HeaderMatcher{Name: hdr.Name,
 				HeaderMatchSpecifier: &envoy_api_v2_route.HeaderMatcher_ExactMatch{ExactMatch: value}})
+		} else {
+			if err != nil {
+				log.WithError(err).Warning("Failed fetching K8s Secret, header match will fail")
+				// Envoy treats an empty exact match value as matching ANY value; adding
+				// InvertMatch: true here will cause this rule to NEVER match.
+				headers = append(headers, &envoy_api_v2_route.HeaderMatcher{Name: hdr.Name,
+					HeaderMatchSpecifier: &envoy_api_v2_route.HeaderMatcher_ExactMatch{ExactMatch: ""},
+					InvertMatch:          true})
+			} else {
+				// Only header presence needed
+				headers = append(headers, &envoy_api_v2_route.HeaderMatcher{Name: hdr.Name,
+					HeaderMatchSpecifier: &envoy_api_v2_route.HeaderMatcher_PresentMatch{PresentMatch: true}})
+			}
 		}
 	}
 	if len(headers) == 0 {
@@ -549,7 +571,55 @@ func getHTTPRule(certManager policy.CertificateManager, h *api.PortRuleHTTP) []*
 	} else {
 		SortHeaderMatchers(headers)
 	}
-	return headers
+
+	headerMatches := make([]*cilium.HeaderMatch, 0, len(h.HeaderMatches))
+	for _, hdr := range h.HeaderMatches {
+		var mismatch_action cilium.HeaderMatch_MismatchAction
+		switch hdr.Mismatch {
+		case api.MismatchActionLog:
+			mismatch_action = cilium.HeaderMatch_CONTINUE_ON_MISMATCH
+		case api.MismatchActionAdd:
+			mismatch_action = cilium.HeaderMatch_ADD_ON_MISMATCH
+		case api.MismatchActionDelete:
+			mismatch_action = cilium.HeaderMatch_DELETE_ON_MISMATCH
+		case api.MismatchActionReplace:
+			mismatch_action = cilium.HeaderMatch_REPLACE_ON_MISMATCH
+		default:
+			// Default mismatch action (drop) was translated to a regular header match above
+			continue
+		}
+		// Fetch the secret
+		value := ""
+		var err error
+		if hdr.Secret != nil {
+			if certManager == nil {
+				err = fmt.Errorf("HeaderMatches: Nil certManager")
+			} else {
+				value, err = certManager.GetSecretString(context.TODO(), hdr.Secret)
+			}
+		}
+		// Only use Value if secret was not obtained
+		if value == "" && hdr.Value != "" {
+			value = hdr.Value
+			if err != nil {
+				log.WithError(err).Debug("HeaderMatches: Using a default value due to k8s secret not being available")
+				err = nil
+			}
+		}
+		log.Debugf("HeaderMatches: Adding %s: %s", hdr.Name, value)
+		headerMatches = append(headerMatches, &cilium.HeaderMatch{
+			MismatchAction: mismatch_action,
+			Name:           hdr.Name,
+			Value:          value,
+		})
+	}
+	if len(headerMatches) == 0 {
+		headerMatches = nil
+	} else {
+		// SortHeaderMatches(headerMatches)
+	}
+
+	return &cilium.HttpNetworkPolicyRule{Headers: headers, HeaderMatches: headerMatches}
 }
 
 func createBootstrap(filePath string, name, cluster, version string, xdsSock, egressClusterName, ingressClusterName string, adminPath string) {
@@ -668,8 +738,10 @@ func GetEnvoyHTTPRules(certManager policy.CertificateManager, l7Rules *api.L7Rul
 	if len(l7Rules.HTTP) > 0 { // Just cautious. This should never be false.
 		httpRules := make([]*cilium.HttpNetworkPolicyRule, 0, len(l7Rules.HTTP))
 		for _, l7 := range l7Rules.HTTP {
-			headers := getHTTPRule(certManager, &l7)
-			httpRules = append(httpRules, &cilium.HttpNetworkPolicyRule{Headers: headers})
+			httpRule := getHTTPRule(certManager, &l7)
+			if httpRule != nil {
+				httpRules = append(httpRules, httpRule)
+			}
 		}
 		SortHTTPNetworkPolicyRules(httpRules)
 		return &cilium.PortNetworkPolicyRule_HttpRules{

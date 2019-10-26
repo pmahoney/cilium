@@ -1047,15 +1047,43 @@ var (
 		},
 	}
 
-	SecretHeader = map[string]apiextensionsv1beta1.JSONSchemaProps{
+	HeaderMatch = map[string]apiextensionsv1beta1.JSONSchemaProps{
+		"mismatch": {
+			Description: "Mismatch identifies what to do in case there is no match. The " +
+				"default is to drop the request. Otherwise the overall rule is still " +
+				"considered as matching, but the mismatches are logged in the access log.",
+			Type: "string",
+			Enum: []apiextensionsv1beta1.JSON{
+				{
+					Raw: []byte(`"LOG"`),
+				},
+				{
+					Raw: []byte(`"ADD"`),
+				},
+				{
+					Raw: []byte(`"DELETE"`),
+				},
+				{
+					Raw: []byte(`"REPLACE"`),
+				},
+			},
+		},
 		"name": {
 			Description: "Name identifies the header.",
 			Type:        "string",
 		},
 		"secret": {
-			Description: "Secret refers to a k8s secret that contains the value to be matched against.",
+			Description: "Secret refers to a k8s secret that contains the value that must be present in the request.",
 			Type:        "object",
 			Properties:  K8sSecret,
+		},
+		"value": {
+			Description: "Value containst the header value that must be present in the request. If both Secret " +
+				"and Value are specified, " +
+				"the Secret takes precedence, if it exists; i.e., the Value will only be used if " +
+				"the Secret cannot be found or accessed.",
+			Type:       "object",
+			Properties: K8sSecret,
 		},
 	}
 
@@ -1068,15 +1096,15 @@ var (
 			"characters disallowed from the conventional \"path\" part of a URL as defined by " +
 			"RFC 3986.",
 		Properties: map[string]apiextensionsv1beta1.JSONSchemaProps{
-			"secretHeaders": {
-				Description: "SecretHeaders is a list of HTTP headers which must be present and match " +
-					"against the given k8s secret values. If omitted or empty, requests are allowed " +
-					"regardless of headers present.",
+			"headerMatches": {
+				Description: "HeaderMatches is a list of HTTP headers which must be present and match " +
+					"against the given or referenced values or expressions. If omitted or empty, " +
+					"requests are allowed regardless of headers present.",
 				Type: "array",
 				Items: &apiextensionsv1beta1.JSONSchemaPropsOrArray{
 					Schema: &apiextensionsv1beta1.JSONSchemaProps{
 						Type:       "object",
-						Properties: SecretHeader,
+						Properties: HeaderMatch,
 					},
 				},
 			},
